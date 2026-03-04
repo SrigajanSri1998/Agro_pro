@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Task Manager Frontend</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    input, button, select { margin: 4px; padding: 8px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .task { border: 1px solid #ddd; border-radius: 8px; padding: 8px; margin: 8px 0; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+<h1>Task Manager</h1>
+
+<section>
+  <h2>Auth</h2>
+  <div class="row">
+    <input id="name" placeholder="Name (for register)" />
+    <input id="email" placeholder="Email" />
+    <input id="password" type="password" placeholder="Password" />
+    <button onclick="register()">Register</button>
+    <button onclick="login()">Login</button>
+  </div>
+  <p class="muted">Token is kept in localStorage for convenience.</p>
+</section>
+
+<section>
+  <h2>Create Task</h2>
+  <div class="row">
+    <input id="title" placeholder="Task title" />
+    <input id="description" placeholder="Description" />
+    <select id="status">
+      <option value="todo">todo</option>
+      <option value="in_progress">in_progress</option>
+      <option value="done">done</option>
+    </select>
+    <button onclick="createTask()">Add Task</button>
+  </div>
+</section>
+
+<section>
+  <h2>Tasks</h2>
+  <div class="row">
+    <input id="search" placeholder="Search" />
+    <select id="filterStatus">
+      <option value="">all statuses</option>
+      <option value="todo">todo</option>
+      <option value="in_progress">in_progress</option>
+      <option value="done">done</option>
+    </select>
+    <label><input id="includeDeleted" type="checkbox" /> include deleted</label>
+    <button onclick="loadTasks(1)">Refresh</button>
+  </div>
+  <div id="pagination" class="muted"></div>
+  <div id="tasks"></div>
+</section>
+
+<pre id="log"></pre>
+
+<script>
+  let page = 1;
+
+  function token() { return localStorage.getItem('token') || ''; }
+
+  async function api(path, method = 'GET', body = null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token()) headers.Authorization = `Bearer ${token()}`;
+
+    const response = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Request failed');
+    return data;
+  }
+
+  function log(message) {
+    document.getElementById('log').textContent = typeof message === 'string' ? message : JSON.stringify(message, null, 2);
+  }
+
+  async function register() {
+    try {
+      const data = await api('/api/register', 'POST', {
+        name: document.getElementById('name').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+      });
+      log(data);
+    } catch (e) { log(e.message); }
+  }
+
+  async function login() {
+    try {
+      const data = await api('/api/login', 'POST', {
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+      });
+      localStorage.setItem('token', data.token);
+      log('Logged in');
+      loadTasks(1);
+    } catch (e) { log(e.message); }
+  }
+
+  async function createTask() {
+    try {
+      await api('/api/tasks', 'POST', {
+        title: document.getElementById('title').value,
+        description: document.getElementById('description').value,
+        status: document.getElementById('status').value,
+      });
+      loadTasks(page);
+    } catch (e) { log(e.message); }
+  }
+
+  async function removeTask(id) {
+    try {
+      await api(`/api/tasks/${id}`, 'DELETE');
+      loadTasks(page);
+    } catch (e) { log(e.message); }
+  }
+
+  async function restoreTask(id) {
+    try {
+      await api(`/api/tasks/${id}/restore`, 'POST');
+      loadTasks(page);
+    } catch (e) { log(e.message); }
+  }
+
+  async function loadTasks(nextPage = 1) {
+    page = nextPage;
+    const search = document.getElementById('search').value;
+    const status = document.getElementById('filterStatus').value;
+    const includeDeleted = document.getElementById('includeDeleted').checked ? '1' : '0';
+
+    const params = new URLSearchParams({ page: String(page), per_page: '5', include_deleted: includeDeleted });
+    if (search) params.set('search', search);
+    if (status) params.set('status', status);
+
+    try {
+      const data = await api('/api/tasks?' + params.toString());
+      const tasksDiv = document.getElementById('tasks');
+      tasksDiv.innerHTML = '';
+      data.data.forEach(task => {
+        const el = document.createElement('div');
+        el.className = 'task';
+        el.innerHTML = `<strong>${task.title}</strong> (${task.status})<br>${task.description || ''}
+          <div class="muted">id=${task.id} deleted_at=${task.deleted_at || 'null'}</div>
+          <button onclick="removeTask(${task.id})">Soft Delete</button>
+          <button onclick="restoreTask(${task.id})">Restore</button>`;
+        tasksDiv.appendChild(el);
+      });
+      document.getElementById('pagination').textContent = `Page ${data.meta.page}/${data.meta.total_pages} — Total ${data.meta.total}`;
+      log(data.meta);
+    } catch (e) { log(e.message); }
+  }
+</script>
+</body>
+</html>
